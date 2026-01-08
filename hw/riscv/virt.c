@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/typedefs.h"
 #include "qemu/units.h"
 #include "qemu/error-report.h"
 #include "qemu/guest-random.h"
@@ -59,6 +60,11 @@
 #include "qapi/qapi-visit-common.h"
 #include "hw/virtio/virtio-iommu.h"
 #include "hw/uefi/var-service-api.h"
+#include "exec/hwaddr.h"
+#include "hw/core/qdev.h"
+#include "hw/misc/axe-dv-rtl-sim.h"
+#include <stdint.h>
+#include <stdio.h>
 
 /* KVM AIA only supports APLIC MSI. APLIC Wired is always emulated by QEMU. */
 static bool virt_use_kvm_aia_aplic_imsic(RISCVVirtAIAType aia_type)
@@ -81,27 +87,28 @@ static bool virt_aclint_allowed(void)
 }
 
 static const MemMapEntry virt_memmap[] = {
-    [VIRT_DEBUG] =        {        0x0,         0x100 },
-    [VIRT_MROM] =         {     0x1000,        0xf000 },
-    [VIRT_TEST] =         {   0x100000,        0x1000 },
-    [VIRT_RTC] =          {   0x101000,        0x1000 },
-    [VIRT_CLINT] =        {  0x2000000,       0x10000 },
-    [VIRT_ACLINT_SSWI] =  {  0x2F00000,        0x4000 },
-    [VIRT_PCIE_PIO] =     {  0x3000000,       0x10000 },
-    [VIRT_IOMMU_SYS] =    {  0x3010000,        0x1000 },
-    [VIRT_PLATFORM_BUS] = {  0x4000000,     0x2000000 },
-    [VIRT_PLIC] =         {  0xc000000, VIRT_PLIC_SIZE(VIRT_CPUS_MAX * 2) },
-    [VIRT_APLIC_M] =      {  0xc000000, APLIC_SIZE(VIRT_CPUS_MAX) },
-    [VIRT_APLIC_S] =      {  0xd000000, APLIC_SIZE(VIRT_CPUS_MAX) },
-    [VIRT_UART0] =        { 0x10000000,         0x100 },
-    [VIRT_VIRTIO] =       { 0x10001000,        0x1000 },
-    [VIRT_FW_CFG] =       { 0x10100000,          0x18 },
-    [VIRT_FLASH] =        { 0x20000000,     0x4000000 },
-    [VIRT_IMSIC_M] =      { 0x24000000, VIRT_IMSIC_MAX_SIZE },
-    [VIRT_IMSIC_S] =      { 0x28000000, VIRT_IMSIC_MAX_SIZE },
-    [VIRT_PCIE_ECAM] =    { 0x30000000,    0x10000000 },
-    [VIRT_PCIE_MMIO] =    { 0x40000000,    0x40000000 },
-    [VIRT_DRAM] =         { 0x80000000,           0x0 },
+    [VIRT_DEBUG] =          {         0x0,         0x100 },
+    [VIRT_MROM] =           {      0x1000,        0xf000 },
+    [VIRT_TEST] =           {    0x100000,        0x1000 },
+    [VIRT_RTC] =            {    0x101000,        0x1000 },
+    [VIRT_CLINT] =          {   0x2000000,       0x10000 },
+    [VIRT_ACLINT_SSWI] =    {   0x2F00000,        0x4000 },
+    [VIRT_PCIE_PIO] =       {   0x3000000,       0x10000 },
+    [VIRT_IOMMU_SYS] =      {   0x3010000,        0x1000 },
+    [VIRT_PLATFORM_BUS] =   {   0x4000000,     0x2000000 },
+    [VIRT_PLIC] =           {   0xc000000, VIRT_PLIC_SIZE(VIRT_CPUS_MAX * 2) },
+    [VIRT_APLIC_M] =        {   0xc000000, APLIC_SIZE(VIRT_CPUS_MAX) },
+    [VIRT_APLIC_S] =        {   0xd000000, APLIC_SIZE(VIRT_CPUS_MAX) },
+    [VIRT_UART0] =          {  0x10000000,         0x100 },
+    [VIRT_VIRTIO] =         {  0x10001000,        0x1000 },
+    [VIRT_FW_CFG] =         {  0x10100000,          0x18 },
+    [VIRT_FLASH] =          {  0x20000000,     0x4000000 },
+    [VIRT_IMSIC_M] =        {  0x24000000, VIRT_IMSIC_MAX_SIZE },
+    [VIRT_IMSIC_S] =        {  0x28000000, VIRT_IMSIC_MAX_SIZE },
+    [VIRT_PCIE_ECAM] =      {  0x30000000,    0x10000000 },
+    [VIRT_PCIE_MMIO] =      {  0x40000000,    0x40000000 },
+    [VIRT_DRAM] =           {  0x80000000,           0x0 },
+    [VIRT_AXE_DV_RTL_SIM] = { 0x100000000,         0x100 },
 };
 
 /* PCIe high mmio is fixed for RV32 */
@@ -973,6 +980,21 @@ static void create_fdt_uart(RISCVVirtState *s,
     qemu_fdt_setprop_string(ms->fdt, "/aliases", "serial0", name);
 }
 
+static void create_fdt_axe_dv_rtl_sim(RISCVVirtState *s, uint32_t irq_mmio_phandle) {
+    g_autofree char *name = NULL;
+    MachineState *ms = MACHINE(s);
+
+    name = g_strdup_printf("/soc/axe-dv-rtl-sim@%"HWADDR_PRIx,
+                           s->memmap[VIRT_AXE_DV_RTL_SIM].base);
+    qemu_fdt_add_subnode(ms->fdt, name);
+    qemu_fdt_setprop_sized_cells(ms->fdt, name, "reg",
+                                 2, s->memmap[VIRT_AXE_DV_RTL_SIM].base,
+                                 2, s->memmap[VIRT_AXE_DV_RTL_SIM].size);
+    qemu_fdt_setprop_cell(ms->fdt, name, "interrupt-parent", irq_mmio_phandle);
+
+    qemu_fdt_setprop_string(ms->fdt, "/aliases", "dut", name);
+}
+
 static void create_fdt_rtc(RISCVVirtState *s,
                            uint32_t irq_mmio_phandle)
 {
@@ -1142,6 +1164,8 @@ static void finalize_fdt(RISCVVirtState *s)
 
     create_fdt_uart(s, irq_mmio_phandle);
 
+    create_fdt_axe_dv_rtl_sim(s, irq_mmio_phandle);
+
     create_fdt_rtc(s, irq_mmio_phandle);
 }
 
@@ -1188,6 +1212,16 @@ static void create_fdt(RISCVVirtState *s)
     create_fdt_flash(s);
     create_fdt_fw_cfg(s);
     create_fdt_pmu(s);
+}
+
+static void axe_dv_rtl_create(struct MachineState *machine, MemMapEntry const * const mmap_entry) {
+    DeviceState *axe_dv_rtl_sim = qdev_new(TYPE_AXE_DV_RTL_SIM);
+
+    qdev_prop_set_string(axe_dv_rtl_sim, "name", "AXE_DV_RTL_SIM");
+    qdev_prop_set_uint64(axe_dv_rtl_sim, "size", mmap_entry->size);
+
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(axe_dv_rtl_sim), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0, mmap_entry->base);
 }
 
 static inline DeviceState *gpex_pcie_init(MemoryRegion *sys_mem,
@@ -1700,6 +1734,8 @@ static void virt_machine_init(MachineState *machine)
 
     sysbus_create_simple("goldfish_rtc", s->memmap[VIRT_RTC].base,
         qdev_get_gpio_in(mmio_irqchip, RTC_IRQ));
+
+    axe_dv_rtl_create(machine, &s->memmap[VIRT_AXE_DV_RTL_SIM]);
 
     for (i = 0; i < ARRAY_SIZE(s->flash); i++) {
         /* Map legacy -drive if=pflash to machine properties */
