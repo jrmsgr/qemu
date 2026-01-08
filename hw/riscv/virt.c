@@ -1215,9 +1215,14 @@ static void create_fdt(RISCVVirtState *s)
 }
 
 static void axe_dv_rtl_create(struct MachineState *machine, MemMapEntry const * const mmap_entry) {
+
+    RISCVVirtState *s = RISCV_VIRT_MACHINE(machine);
     DeviceState *axe_dv_rtl_sim = qdev_new(TYPE_AXE_DV_RTL_SIM);
 
-    qdev_prop_set_string(axe_dv_rtl_sim, "name", "AXE_DV_RTL_SIM");
+    if (s->axe_dv_rtl_sim_name)
+        qdev_prop_set_string(axe_dv_rtl_sim, "name", s->axe_dv_rtl_sim_name);
+    if (s->axe_dv_rtl_sim_server_file)
+        qdev_prop_set_string(axe_dv_rtl_sim, "server-file", s->axe_dv_rtl_sim_server_file);
     qdev_prop_set_uint64(axe_dv_rtl_sim, "size", mmap_entry->size);
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(axe_dv_rtl_sim), &error_fatal);
@@ -1899,6 +1904,28 @@ static void virt_set_iommu_sys(Object *obj, Visitor *v, const char *name,
     visit_type_OnOffAuto(v, name, &s->iommu_sys, errp);
 }
 
+static void virt_set_axe_dv_rtl_sim_name(Object *obj, const char *val,
+                                         Error **errp) {
+    RISCVVirtState *s = RISCV_VIRT_MACHINE(obj);
+    s->axe_dv_rtl_sim_name = g_strdup(val);
+}
+
+static char* virt_get_axe_dv_rtl_sim_name(Object *obj, Error **errp) {
+    RISCVVirtState *s = RISCV_VIRT_MACHINE(obj);
+    return g_strdup(s->axe_dv_rtl_sim_name);
+}
+
+static void virt_set_axe_dv_rtl_sim_server_file(Object *obj, const char *val,
+                                         Error **errp) {
+    RISCVVirtState *s = RISCV_VIRT_MACHINE(obj);
+    s->axe_dv_rtl_sim_server_file = g_strdup(val);
+}
+
+static char* virt_get_axe_dv_rtl_sim_server_file(Object *obj, Error **errp) {
+    RISCVVirtState *s = RISCV_VIRT_MACHINE(obj);
+    return g_strdup(s->axe_dv_rtl_sim_server_file);
+}
+
 bool virt_is_acpi_enabled(RISCVVirtState *s)
 {
     return s->acpi != ON_OFF_AUTO_OFF;
@@ -2027,6 +2054,14 @@ static void virt_machine_class_init(ObjectClass *oc, const void *data)
                               NULL, NULL);
     object_class_property_set_description(oc, "iommu-sys",
                                           "Enable IOMMU platform device");
+
+    object_class_property_add_str(oc, "axe-dv-rtl-sim-name", virt_get_axe_dv_rtl_sim_name, virt_set_axe_dv_rtl_sim_name);
+    object_class_property_set_description(oc, "axe-dv-rtl-sim-name",
+                                          "Set the name of axe-dv-rtl-sim periph");
+
+    object_class_property_add_str(oc, "axe-dv-rtl-sim-server-file", virt_get_axe_dv_rtl_sim_server_file, virt_set_axe_dv_rtl_sim_server_file);
+    object_class_property_set_description(oc, "axe-dv-rtl-sim-server-file",
+                                          "Server file to connect to the simulator");
 }
 
 static const TypeInfo virt_machine_typeinfo = {
