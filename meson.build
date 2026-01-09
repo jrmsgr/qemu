@@ -4081,11 +4081,15 @@ libaudio = static_library('qemuaudio', audio_ss.sources() + genh,
 audio = declare_dependency(objects: libaudio.extract_all_objects(recursive: false),
                            dependencies: [audio_ss.dependencies(), qom])
 
+# Link to multisim.so
+multisim_inc = include_directories('/home/jsauger/test_qemu_riscv/multisim/src/core')
+multisim_dep = declare_dependency(link_args: ['/home/jsauger/test_qemu_riscv/multisim/src/core/multisim_client.so'], include_directories:multisim_inc, compile_args: ['-DMULTISIM_SW'])
+
 ###########
 # Targets #
 ###########
 
-system_ss.add(authz, blockdev, chardev, crypto, io, qmp, audio)
+system_ss.add(authz, blockdev, chardev, crypto, io, qmp, audio, multisim_dep)
 common_ss.add(qom, qemuutil)
 
 libuser = static_library('user',

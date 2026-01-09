@@ -10,17 +10,23 @@
 #include "qom/object.h"
 #include "exec/memattrs.h"
 #include "hw/misc/axe-dv-rtl-sim.h"
+#include "multisim_client.h"
+#include <linux/limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 // clang-format on
 
 OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
+
+#define MULTISIM_SERVER_NAME "qemu-multisim"
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
 
   MemoryRegion iomem;
   char *name;
-  char* server_file;
+  char* multisim_dir;
   uint64_t size;
 };
 
@@ -58,7 +64,20 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   memory_region_init_io(&s->iomem, OBJECT(s), &axe_dv_rtl_sim_ops, s, s->name,
                         s->size);
 
+  s->multisim_dir = getcwd(NULL, 0);
+  if (s->multisim_dir == NULL) {
+      error_setg(errp, "Could not get the current dir\n");
+      return;
+  }
+
+  multisim_client_start(s->multisim_dir, MULTISIM_SERVER_NAME);
+
   sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
+}
+
+static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
+    AxeDvRtlSim *s = AXE_DV_RTL_SIM(dev);
+    free(s->multisim_dir);
 }
 
 static const Property axe_dv_rtl_sim_properties[] = {
@@ -70,6 +89,7 @@ static void axe_dv_rtl_sim_class_init(ObjectClass *klass, const void *data) {
   DeviceClass *dc = DEVICE_CLASS(klass);
 
   dc->realize = axe_dv_rtl_sim_realize;
+  dc->unrealize = axe_dv_rtl_sim_unrealize;
   device_class_set_props(dc, axe_dv_rtl_sim_properties);
   set_bit(DEVICE_CATEGORY_MISC, dc->categories);
   dc->desc = "RTL sim adapter by Axelera";
