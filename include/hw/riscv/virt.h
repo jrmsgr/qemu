@@ -65,7 +65,6 @@ struct RISCVVirtState {
     OnOffAuto iommu_sys;
     uint16_t pci_iommu_bdf;
     char* axe_dv_rtl_sim_name;
-    char* axe_dv_rtl_sim_server_file;
 };
 
 enum {

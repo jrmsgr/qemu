@@ -9,11 +9,9 @@
 #include "trace.h"
 #include "qom/object.h"
 #include "exec/memattrs.h"
-#include <stdio.h>
 #include "hw/misc/axe-dv-rtl-sim.h"
+#include <stdio.h>
 // clang-format on
-
-#define MULTISIM_SERVER_NAME "multisim"
 
 OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 
@@ -66,7 +64,6 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
 static const Property axe_dv_rtl_sim_properties[] = {
     DEFINE_PROP_STRING("name", AxeDvRtlSim, name),
     DEFINE_PROP_UINT64("size", AxeDvRtlSim, size, 0),
-    DEFINE_PROP_STRING("server-file", AxeDvRtlSim, server_file)
 };
 
 static void axe_dv_rtl_sim_class_init(ObjectClass *klass, const void *data) {
