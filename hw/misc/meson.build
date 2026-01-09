@@ -7,7 +7,7 @@ system_ss.add(when: 'CONFIG_PCI_TESTDEV', if_true: files('pci-testdev.c'))
 system_ss.add(when: 'CONFIG_IOMMU_TESTDEV', if_true: files('iommu-testdev.c'))
 system_ss.add(when: 'CONFIG_UNIMP', if_true: files('unimp.c'))
 system_ss.add(when: 'CONFIG_EMPTY_SLOT', if_true: files('empty_slot.c'))
-system_ss.add(when: 'CONFIG_AXE_DV_RTL_SIM', if_true: files('axe-dv-rtl-sim.c'))
+system_ss.add(when: 'CONFIG_AXE_DV_RTL_SIM', if_true: files('axe-dv-rtl-sim.c', 'multisim_client.cpp', 'socket_server/client.cpp'))
 system_ss.add(when: 'CONFIG_LED', if_true: files('led.c'))
 system_ss.add(when: 'CONFIG_PVPANIC_COMMON', if_true: files('pvpanic.c'))
 
