@@ -1,4 +1,4 @@
-project('qemu', ['c', 'cpp'], meson_version: '>=1.5.0',
+project('qemu', ['c'], meson_version: '>=1.5.0',
         default_options: ['warning_level=1', 'c_std=gnu11', 'cpp_std=gnu++23', 'b_colorout=auto',
                           'b_staticpic=false', 'stdsplit=false', 'optimization=2', 'b_pie=true'] +
 
@@ -80,8 +80,7 @@ sh = find_program('sh')
 python = import('python').find_installation()
 
 cc = meson.get_compiler('c')
-cxx = meson.get_compiler('cpp')
-all_languages = ['c', 'cpp']
+all_languages = ['c']
 enable_cpp = host_os == 'windows' or get_option('plugins')
 if enable_cpp and add_languages('cpp', required: false, native: false)
   all_languages += ['cpp']
@@ -760,7 +759,7 @@ endif
 # Set up C++ compiler flags
 qemu_cxxflags = []
 if 'cpp' in all_languages
-  qemu_cxxflags = ['-D__STDC_LIMIT_MACROS', '-D__STDC_CONSTANT_MACROS', '-D__STDC_FORMAT_MACROS', '-DSW'] + qemu_cflags
+  qemu_cxxflags = ['-D__STDC_LIMIT_MACROS', '-D__STDC_CONSTANT_MACROS', '-D__STDC_FORMAT_MACROS'] + qemu_cflags
 endif
 
 add_project_arguments(cc.get_supported_arguments(qemu_common_flags + qemu_cflags + warn_flags),
