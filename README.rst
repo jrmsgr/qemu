@@ -2,6 +2,8 @@
 QEMU README
 ===========
 
+⚠️ Warning: This repo is not the official one, it is meant to be used as a submodule of `<https://git.axelera.ai/jerome.sauger/qemu_hello_world/-/tree/master>`_.
+
 QEMU is a generic and open source machine & userspace emulator and
 virtualizer.
 
