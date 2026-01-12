@@ -19,7 +19,13 @@
 
 OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 
-#define MULTISIM_SERVER_NAME "qemu-multisim"
+#define MULTISIM_CMD_SERVER_NAME "rw_cmd"
+#define MULTISIM_RSP_SERVER_NAME "rw_rsp"
+#define MULTISIM_CMD_READ 0x1
+#define MULTISIM_CMD_WRITE 0x0
+#define MULTISIM_XFER_FAIL 0x0
+#define MULTISIM_XFER_SUCCESS 0x1
+#define MULTISIM_MEM_WRITE_SUCCESS 0x0
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
@@ -33,19 +39,40 @@ struct AxeDvRtlSim {
 static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
                                                   uint64_t *data, unsigned size,
                                                   MemTxAttrs attrs) {
+  uint64_t payload[3] = {MULTISIM_CMD_READ, addr, 0x0};
+  int result;
 
-  MemTxResult result = MEMTX_DECODE_ERROR;
-  printf("Read at address 0x%lx with size 0x%x\n", addr, size);
+  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
+  if (result != MULTISIM_XFER_SUCCESS) {
+      return MEMTX_ERROR;
+  }
 
-  return result;
+  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)data, 64);
+  if (result != MULTISIM_XFER_SUCCESS) {
+      return MEMTX_ERROR;
+  }
+
+  return MEMTX_OK;
 }
 
 static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
                                                    uint64_t data, unsigned size,
                                                    MemTxAttrs attrs) {
-  MemTxResult result = MEMTX_DECODE_ERROR;
+  uint64_t payload[3] = {MULTISIM_CMD_WRITE, addr, data};
+  uint64_t access_resp = 0;
+  int result;
 
-  return result;
+  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
+  if (result != MULTISIM_XFER_SUCCESS) {
+      return MEMTX_ERROR;
+  }
+
+  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)&access_resp, 64);
+  if (result != MULTISIM_XFER_SUCCESS) {
+      return MEMTX_ERROR;
+  }
+
+  return (access_resp == MULTISIM_MEM_WRITE_SUCCESS) ? MEMTX_OK : MEMTX_ERROR;
 }
 
 static const MemoryRegionOps axe_dv_rtl_sim_ops = {
@@ -70,7 +97,8 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
       return;
   }
 
-  multisim_client_start(s->multisim_dir, MULTISIM_SERVER_NAME);
+  multisim_client_start(s->multisim_dir, MULTISIM_CMD_SERVER_NAME);
+  multisim_client_start(s->multisim_dir, MULTISIM_RSP_SERVER_NAME);
 
   sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
 }
