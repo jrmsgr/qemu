@@ -6,7 +6,9 @@
 #include "hw/core/qdev-properties.h"
 #include "hw/misc/empty_slot.h"
 #include "qapi/error.h"
+#include "system/system.h"
 #include "trace.h"
+#include "qemu/notify.h"
 #include "qom/object.h"
 #include "exec/memattrs.h"
 #include "hw/misc/axe-dv-rtl-sim.h"
@@ -21,6 +23,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 
 #define MULTISIM_CMD_SERVER_NAME "rw_cmd"
 #define MULTISIM_RSP_SERVER_NAME "rw_rsp"
+#define MULTISIM_EXIT_SERVER_NAME "exit"
 #define MULTISIM_CMD_READ 0x1
 #define MULTISIM_CMD_WRITE 0x0
 #define MULTISIM_XFER_FAIL 0x0
@@ -34,6 +37,7 @@ struct AxeDvRtlSim {
   char *name;
   char* multisim_dir;
   uint64_t size;
+  Notifier exit_notifier;
 };
 
 static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
@@ -81,6 +85,11 @@ static const MemoryRegionOps axe_dv_rtl_sim_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
+static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
+    const uint32_t exit_request = 0x1;
+    multisim_client_push(MULTISIM_EXIT_SERVER_NAME, (data_handle_t)&exit_request, 64);
+};
+
 static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   AxeDvRtlSim *s = AXE_DV_RTL_SIM(dev);
 
@@ -99,8 +108,12 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
 
   multisim_client_start(s->multisim_dir, MULTISIM_CMD_SERVER_NAME);
   multisim_client_start(s->multisim_dir, MULTISIM_RSP_SERVER_NAME);
+  multisim_client_start(s->multisim_dir, MULTISIM_EXIT_SERVER_NAME);
 
   sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
+
+  s->exit_notifier.notify = axe_dv_rtl_sim_exit_notifier;
+  qemu_add_exit_notifier(&s->exit_notifier);
 }
 
 static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
