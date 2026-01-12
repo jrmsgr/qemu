@@ -121,6 +121,12 @@ config SPIKE
     select RISCV_ACLINT
     select SIFIVE_PLIC
 
+config AXE_DV
+    bool
+    default y
+    depends on SPIKE
+    select AXE_DV_RTL_SIM
+
 config XIANGSHAN_KUNMINGHU
     bool
     default y
