@@ -25,8 +25,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 #define MULTISIM_EXIT_SERVER_NAME "exit"
 #define MULTISIM_CMD_READ 0x1
 #define MULTISIM_CMD_WRITE 0x0
-#define MULTISIM_XFER_FAIL 0x0
-#define MULTISIM_XFER_SUCCESS 0x1
 #define MULTISIM_MEM_WRITE_SUCCESS 0x0
 
 struct AxeDvRtlSim {
@@ -47,13 +45,13 @@ static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
   MemTxResult ret = MEMTX_OK;
 
   result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
-  if (result != MULTISIM_XFER_SUCCESS) {
+  if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
   result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)data, 64);
-  if (result != MULTISIM_XFER_SUCCESS) {
+  if (result != MULTISIM_SUCCESS) {
       return MEMTX_ERROR;
   }
 
@@ -71,13 +69,13 @@ static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
   MemTxResult ret = MEMTX_OK;
 
   result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
-  if (result != MULTISIM_XFER_SUCCESS) {
+  if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
   result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)&access_resp, 64);
-  if (result != MULTISIM_XFER_SUCCESS) {
+  if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
