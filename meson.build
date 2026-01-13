@@ -4082,8 +4082,9 @@ audio = declare_dependency(objects: libaudio.extract_all_objects(recursive: fals
                            dependencies: [audio_ss.dependencies(), qom])
 
 # Link to multisim.so
-multisim_inc = include_directories('../../multisim/src/core')
-multisim_dep = declare_dependency(link_args: ['../../multisim/src/core/multisim_client.so'], include_directories:multisim_inc, compile_args: ['-DMULTISIM_SW'])
+multisim_inc = include_directories('../../multisim/multisim_release/')
+multisim_dep = declare_dependency(link_args: ['-L../../multisim/multisim_release/', '-l:multisim_client.so'],
+                                  include_directories:multisim_inc, compile_args: ['-DMULTISIM_SW'])
 
 ###########
 # Targets #
