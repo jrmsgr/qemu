@@ -69,6 +69,11 @@ ecc_diag_mem_readb(uint64_t addr, uint32_t ret) "Read diagnostic %"PRId64"= 0x%0
 # empty_slot.c
 empty_slot_write(uint64_t addr, unsigned width, uint64_t value, unsigned size, const char *name) "wr addr:0x%04"PRIx64" data:0x%0*"PRIx64" size %u [%s]"
 
+# axe-dv-rtl-sim.c
+axe_dv_rtl_sim_write(uint64_t addr, unsigned size, uint64_t data, int result) "wr addr:0x%08"PRIx64" size: %u data:0x%08"PRIx64" result: %d"
+axe_dv_rtl_sim_read(uint64_t addr, unsigned size, uint64_t data, int result) "rd addr:0x%08"PRIx64" size: %u data:0x%08"PRIx64" result: %d"
+axe_dv_rtl_sim_exit(void) "Exiting"
+
 # slavio_misc.c
 slavio_misc_update_irq_raise(void) "Raise IRQ"
 slavio_misc_update_irq_lower(void) "Lower IRQ"

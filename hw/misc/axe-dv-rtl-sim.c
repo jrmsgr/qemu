@@ -1,10 +1,8 @@
 
 // clang-format off
-// Include order matters!!!
-#include "qemu/osdep.h"
+#include "qemu/osdep.h" // Must be at the top
 #include "hw/core/sysbus.h"
 #include "hw/core/qdev-properties.h"
-#include "hw/misc/empty_slot.h"
 #include "qapi/error.h"
 #include "system/system.h"
 #include "trace.h"
@@ -13,6 +11,7 @@
 #include "exec/memattrs.h"
 #include "hw/misc/axe-dv-rtl-sim.h"
 #include "multisim_client.h"
+#include "trace/trace-hw_misc.h"
 #include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,10 +44,12 @@ static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
                                                   MemTxAttrs attrs) {
   uint64_t payload[3] = {MULTISIM_CMD_READ, addr, 0x0};
   int result;
+  MemTxResult ret = MEMTX_OK;
 
   result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
   if (result != MULTISIM_XFER_SUCCESS) {
-      return MEMTX_ERROR;
+      ret = MEMTX_ERROR;
+      goto function_out;
   }
 
   result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)data, 64);
@@ -56,7 +57,9 @@ static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
       return MEMTX_ERROR;
   }
 
-  return MEMTX_OK;
+function_out:
+  trace_axe_dv_rtl_sim_read(addr, size, *data, ret);
+  return ret;
 }
 
 static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
@@ -65,18 +68,27 @@ static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
   uint64_t payload[3] = {MULTISIM_CMD_WRITE, addr, data};
   uint64_t access_resp = 0;
   int result;
+  MemTxResult ret = MEMTX_OK;
 
   result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
   if (result != MULTISIM_XFER_SUCCESS) {
-      return MEMTX_ERROR;
+      ret = MEMTX_ERROR;
+      goto function_out;
   }
 
   result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)&access_resp, 64);
   if (result != MULTISIM_XFER_SUCCESS) {
-      return MEMTX_ERROR;
+      ret = MEMTX_ERROR;
+      goto function_out;
   }
 
-  return (access_resp == MULTISIM_MEM_WRITE_SUCCESS) ? MEMTX_OK : MEMTX_ERROR;
+  if (access_resp != MULTISIM_MEM_WRITE_SUCCESS) {
+      ret = MEMTX_ERROR;
+  }
+
+function_out:
+  trace_axe_dv_rtl_sim_write(addr, size, data, ret);
+  return ret;
 }
 
 static const MemoryRegionOps axe_dv_rtl_sim_ops = {
@@ -88,6 +100,7 @@ static const MemoryRegionOps axe_dv_rtl_sim_ops = {
 static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
     const uint32_t exit_request = 0x1;
     multisim_client_push(MULTISIM_EXIT_SERVER_NAME, (data_handle_t)&exit_request, 64);
+    trace_axe_dv_rtl_sim_exit();
 };
 
 static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
@@ -136,17 +149,15 @@ static void axe_dv_rtl_sim_class_init(ObjectClass *klass, const void *data) {
   dc->desc = "RTL sim adapter by Axelera";
 }
 
-// clang-format off
 static const TypeInfo axe_dv_rtl_sim_info = {
     .name = TYPE_AXE_DV_RTL_SIM, 
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(AxeDvRtlSim),
     .class_init = axe_dv_rtl_sim_class_init,
 };
-// clang-format on
 
-static void empty_slot_register_types(void) {
+static void axe_dv_register_types(void) {
   type_register_static(&axe_dv_rtl_sim_info);
 }
 
-type_init(empty_slot_register_types)
+type_init(axe_dv_register_types)
