@@ -95,6 +95,9 @@ static const MemoryRegionOps axe_dv_rtl_sim_ops = {
     .read_with_attrs = axe_dv_rtl_sim_read_with_attrs,
     .write_with_attrs = axe_dv_rtl_sim_write_with_attrs,
     .endianness = DEVICE_LITTLE_ENDIAN,
+    // QEMU defaults to min=1 byte and max=4 bytes if no size is specified
+    .impl.max_access_size = 8,
+    .impl.min_access_size = 1
 };
 
 static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
