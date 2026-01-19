@@ -1,5 +1,6 @@
 
 // clang-format off
+#include "qemu/compiler.h"
 #include "qemu/osdep.h" // Must be at the top
 #include "hw/core/sysbus.h"
 #include "hw/core/qdev-properties.h"
@@ -20,8 +21,9 @@
 
 OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 
-#define MULTISIM_CMD_SERVER_NAME "qemu_rw_cmd"
-#define MULTISIM_RSP_SERVER_NAME "qemu_rw_rsp"
+#define MULTISIM_NAME_MAX 1024
+#define MULTISIM_CMD_SERVER_NAME "rw_cmd"
+#define MULTISIM_RSP_SERVER_NAME "rw_rsp"
 #define MULTISIM_EXIT_SERVER_NAME "exit"
 #define MULTISIM_CMD_READ 0x1
 #define MULTISIM_CMD_WRITE 0x0
@@ -34,6 +36,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 #define AXI_OKAY 0
 #define AXI_EXOKAY 1
 #define AXI_DEC_ERR 3
+#define EXIT_CMD_BIT_LEN (64*AXI_RSP_UI64_LEN)
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
@@ -41,6 +44,10 @@ struct AxeDvRtlSim {
   MemoryRegion iomem;
   char *name;
   char* multisim_dir;
+  char* multisim_server_prefix;
+  char* multisim_cmd_server;
+  char* multisim_rsp_server;
+  char* multisim_exit_server;
   uint64_t size;
   Notifier exit_notifier;
 };
@@ -66,18 +73,20 @@ static inline MemTxResult axe_dv_rtl_sim_axi_resp_to_memtxresult(uint64_t code) 
 static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
                                                   uint64_t *data, unsigned size,
                                                   MemTxAttrs attrs) {
+
+  AxeDvRtlSim *s = AXE_DV_RTL_SIM(opaque);
   uint64_t cmd_payload[AXI_CMD_UI64_LEN] = {((uint64_t)TO_BITS(size) << 32) | MULTISIM_CMD_READ, addr, 0x0};
   uint64_t rsp_payload[AXI_CMD_UI64_LEN] = {0};
   int result;
   MemTxResult ret = MEMTX_OK;
 
-  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
+  result = multisim_client_push(s->multisim_cmd_server, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
-  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
+  result = multisim_client_pull(s->multisim_rsp_server, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
@@ -94,18 +103,19 @@ function_out:
 static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
                                                    uint64_t data, unsigned size,
                                                    MemTxAttrs attrs) {
+  AxeDvRtlSim *s = AXE_DV_RTL_SIM(opaque);
   uint64_t cmd_payload[AXI_CMD_UI64_LEN] = {((uint64_t)TO_BITS(size)<< 32) | MULTISIM_CMD_WRITE, addr, data};
   uint64_t rsp_payload[AXI_CMD_UI64_LEN] = {0};
   int result;
   MemTxResult ret = MEMTX_OK;
 
-  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
+  result = multisim_client_push(s->multisim_cmd_server, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
-  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
+  result = multisim_client_pull(s->multisim_rsp_server, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
@@ -128,8 +138,9 @@ static const MemoryRegionOps axe_dv_rtl_sim_ops = {
 };
 
 static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
+    AxeDvRtlSim* s = container_of(notifier, AxeDvRtlSim, exit_notifier);
     const uint32_t exit_request = 0x1;
-    multisim_client_push(MULTISIM_EXIT_SERVER_NAME, (data_handle_t)&exit_request, 64);
+    multisim_client_push(s->multisim_exit_server, (data_handle_t)&exit_request, EXIT_CMD_BIT_LEN);
     trace_axe_dv_rtl_sim_exit();
 };
 
@@ -149,9 +160,28 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
       return;
   }
 
-  multisim_client_start(s->multisim_dir, MULTISIM_CMD_SERVER_NAME);
-  multisim_client_start(s->multisim_dir, MULTISIM_RSP_SERVER_NAME);
-  multisim_client_start(s->multisim_dir, MULTISIM_EXIT_SERVER_NAME);
+  if (s->multisim_server_prefix == NULL) {
+      error_setg(errp, "multisim-server-prefix is not set\n");
+      return;
+  }
+
+  if ((strlen(s->multisim_server_prefix)+strlen(MULTISIM_CMD_SERVER_NAME)) > MULTISIM_NAME_MAX) {
+      error_setg(errp, "multisim-server-prefix is too long\n");
+      return;
+  }
+  s->multisim_cmd_server = g_malloc0(MULTISIM_NAME_MAX);
+  s->multisim_rsp_server = g_malloc0(MULTISIM_NAME_MAX);
+  s->multisim_exit_server = g_malloc0(MULTISIM_NAME_MAX);
+  if ((sprintf(s->multisim_cmd_server, "%s_%s", s->multisim_server_prefix, MULTISIM_CMD_SERVER_NAME) < 0) ||
+          (sprintf(s->multisim_rsp_server, "%s_%s", s->multisim_server_prefix, MULTISIM_RSP_SERVER_NAME) < 0) ||
+          (sprintf(s->multisim_exit_server, "%s_%s", s->multisim_server_prefix, MULTISIM_EXIT_SERVER_NAME) < 0)) {
+      error_setg(errp, "failed to create server names\n");
+      return;
+  }
+
+  multisim_client_start(s->multisim_dir, s->multisim_cmd_server);
+  multisim_client_start(s->multisim_dir, s->multisim_rsp_server);
+  multisim_client_start(s->multisim_dir, s->multisim_exit_server);
 
   trace_axe_dv_rtl_sim_connection_done();
 
@@ -164,11 +194,15 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
 static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
     AxeDvRtlSim *s = AXE_DV_RTL_SIM(dev);
     free(s->multisim_dir);
+    g_free(s->multisim_cmd_server);
+    g_free(s->multisim_rsp_server);
+    g_free(s->multisim_exit_server);
 }
 
 static const Property axe_dv_rtl_sim_properties[] = {
     DEFINE_PROP_STRING("name", AxeDvRtlSim, name),
     DEFINE_PROP_UINT64("size", AxeDvRtlSim, size, 0),
+    DEFINE_PROP_STRING("multisim-server-prefix", AxeDvRtlSim, multisim_server_prefix),
 };
 
 static void axe_dv_rtl_sim_class_init(ObjectClass *klass, const void *data) {

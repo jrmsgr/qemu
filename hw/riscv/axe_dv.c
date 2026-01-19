@@ -42,6 +42,8 @@
 
 #include <libfdt.h>
 
+static const char *multisim_server_prefix = NULL;
+
 static const MemMapEntry axe_dv_memmap[] = {
     [AXE_DV_MROM] =     {     0x1000,     0xf000 },
     [AXE_DV_HTIF] =     {  0x1000000,     0x1000 },
@@ -274,6 +276,10 @@ static void axe_dv_board_init(MachineState *machine)
 
     qdev_prop_set_string(axe_dv_rtl_sim, "name", "RTL DUT");
     qdev_prop_set_uint64(axe_dv_rtl_sim, "size", memmap[AXE_DV_AXE_DV_RTL_SIM].size);
+    if (multisim_server_prefix == NULL) {
+        multisim_server_prefix = "qemu";
+    }
+    qdev_prop_set_string(axe_dv_rtl_sim, "multisim-server-prefix", multisim_server_prefix);
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(axe_dv_rtl_sim), &error_fatal);
     sysbus_mmio_map(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0, memmap[AXE_DV_AXE_DV_RTL_SIM].base);
@@ -358,6 +364,11 @@ static void axe_dv_set_signature(Object *obj, const char *val, Error **errp)
     sig_file = g_strdup(val);
 }
 
+static void axe_dv_set_multisim_server_prefix(Object *obj, const char *val, Error **errp)
+{
+    multisim_server_prefix = g_strdup(val);
+}
+
 static void axe_dv_machine_instance_init(Object *obj)
 {
 }
@@ -386,6 +397,10 @@ static void axe_dv_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "signature-granularity",
                                           "Size of each line in ACT signature "
                                           "file");
+
+    object_class_property_add_str(oc, "axe-dv-rtl-multisim-server-prefix", NULL, axe_dv_set_multisim_server_prefix);
+    object_class_property_set_description(oc, "axe-dv-rtl-multisim-server-prefix",
+                                          "Prefix of the multisim server to connect to.");
 }
 
 static const TypeInfo axe_dv_machine_typeinfo = {
