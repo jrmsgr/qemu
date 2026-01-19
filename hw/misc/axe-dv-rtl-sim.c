@@ -20,12 +20,20 @@
 
 OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 
-#define MULTISIM_CMD_SERVER_NAME "rw_cmd"
-#define MULTISIM_RSP_SERVER_NAME "rw_rsp"
+#define MULTISIM_CMD_SERVER_NAME "qemu_rw_cmd"
+#define MULTISIM_RSP_SERVER_NAME "qemu_rw_rsp"
 #define MULTISIM_EXIT_SERVER_NAME "exit"
 #define MULTISIM_CMD_READ 0x1
 #define MULTISIM_CMD_WRITE 0x0
 #define MULTISIM_MEM_WRITE_SUCCESS 0x0
+#define AXI_CMD_UI64_LEN 3
+#define AXI_RSP_UI64_LEN 2
+#define TO_BITS(n) (8*n)
+#define AXI_CMD_BIT_LEN (64*AXI_CMD_UI64_LEN)
+#define AXI_RSP_BIT_LEN (64*AXI_RSP_UI64_LEN)
+#define AXI_OKAY 0
+#define AXI_EXOKAY 1
+#define AXI_DEC_ERR 3
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
@@ -37,23 +45,46 @@ struct AxeDvRtlSim {
   Notifier exit_notifier;
 };
 
+static inline MemTxResult axe_dv_rtl_sim_axi_resp_to_memtxresult(uint64_t code) {
+    MemTxResult ret;
+    switch (code) {
+        case AXI_DEC_ERR:
+            ret = MEMTX_DECODE_ERROR;
+            break;
+        case AXI_OKAY:
+        case AXI_EXOKAY:
+            ret = MEMTX_OK;
+            break;
+        default:
+            ret = MEMTX_ERROR;
+            break;
+    }
+
+    return ret;
+}
+
 static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
                                                   uint64_t *data, unsigned size,
                                                   MemTxAttrs attrs) {
-  uint64_t payload[3] = {MULTISIM_CMD_READ, addr, 0x0};
+  uint64_t cmd_payload[AXI_CMD_UI64_LEN] = {((uint64_t)TO_BITS(size) << 32) | MULTISIM_CMD_READ, addr, 0x0};
+  uint64_t rsp_payload[AXI_CMD_UI64_LEN] = {0};
   int result;
   MemTxResult ret = MEMTX_OK;
 
-  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
+  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
-  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)data, 64);
+  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
-      return MEMTX_ERROR;
+      ret = MEMTX_ERROR;
+      goto function_out;
   }
+
+  *data = rsp_payload[1];
+  ret = axe_dv_rtl_sim_axi_resp_to_memtxresult(rsp_payload[0]);
 
 function_out:
   trace_axe_dv_rtl_sim_read(addr, size, *data, ret);
@@ -63,26 +94,24 @@ function_out:
 static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
                                                    uint64_t data, unsigned size,
                                                    MemTxAttrs attrs) {
-  uint64_t payload[3] = {MULTISIM_CMD_WRITE, addr, data};
-  uint64_t access_resp = 0;
+  uint64_t cmd_payload[AXI_CMD_UI64_LEN] = {((uint64_t)TO_BITS(size)<< 32) | MULTISIM_CMD_WRITE, addr, data};
+  uint64_t rsp_payload[AXI_CMD_UI64_LEN] = {0};
   int result;
   MemTxResult ret = MEMTX_OK;
 
-  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)payload, 3*64);
+  result = multisim_client_push(MULTISIM_CMD_SERVER_NAME, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
-  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)&access_resp, 64);
+  result = multisim_client_pull(MULTISIM_RSP_SERVER_NAME, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
       goto function_out;
   }
 
-  if (access_resp != MULTISIM_MEM_WRITE_SUCCESS) {
-      ret = MEMTX_ERROR;
-  }
+  ret = axe_dv_rtl_sim_axi_resp_to_memtxresult(rsp_payload[0]);
 
 function_out:
   trace_axe_dv_rtl_sim_write(addr, size, data, ret);
@@ -123,6 +152,8 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   multisim_client_start(s->multisim_dir, MULTISIM_CMD_SERVER_NAME);
   multisim_client_start(s->multisim_dir, MULTISIM_RSP_SERVER_NAME);
   multisim_client_start(s->multisim_dir, MULTISIM_EXIT_SERVER_NAME);
+
+  trace_axe_dv_rtl_sim_connection_done();
 
   sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
 
