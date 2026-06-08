@@ -33,6 +33,7 @@
 #include "hw/riscv/axe_dv.h"
 #include "hw/riscv/boot.h"
 #include "hw/riscv/numa.h"
+#include "hw/riscv/machines-qom.h"
 #include "hw/char/riscv_htif.h"
 #include "hw/intc/riscv_aclint.h"
 #include "hw/misc/axe-dv-rtl-sim.h"
@@ -380,7 +381,6 @@ static void axe_dv_machine_class_init(ObjectClass *oc, const void *data)
     mc->desc = "RISC-V AxeDv board";
     mc->init = axe_dv_board_init;
     mc->max_cpus = AXE_DV_CPUS_MAX;
-    mc->is_default = true;
     mc->default_cpu_type = TYPE_RISCV_CPU_BASE;
     mc->possible_cpu_arch_ids = riscv_numa_possible_cpu_arch_ids;
     mc->cpu_index_to_instance_props = riscv_numa_cpu_index_to_props;
@@ -409,6 +409,7 @@ static const TypeInfo axe_dv_machine_typeinfo = {
     .class_init = axe_dv_machine_class_init,
     .instance_init = axe_dv_machine_instance_init,
     .instance_size = sizeof(AxeDvState),
+    .interfaces = riscv32_64_machine_interfaces,
 };
 
 static void axe_dv_machine_init_register_types(void)
