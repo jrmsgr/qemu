@@ -83,19 +83,20 @@ static MemTxResult axe_dv_rtl_sim_read_with_attrs(void *opaque, hwaddr addr,
   result = multisim_client_push(s->multisim_cmd_server, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
-      goto function_out;
+      trace_axe_dv_rtl_sim_read(addr, size, *data, ret);
+      return ret;
   }
 
   result = multisim_client_pull(s->multisim_rsp_server, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
-      goto function_out;
+      trace_axe_dv_rtl_sim_read(addr, size, *data, ret);
+      return ret;
   }
 
   *data = rsp_payload[1];
   ret = axe_dv_rtl_sim_axi_resp_to_memtxresult(rsp_payload[0]);
 
-function_out:
   trace_axe_dv_rtl_sim_read(addr, size, *data, ret);
   return ret;
 }
@@ -112,18 +113,19 @@ static MemTxResult axe_dv_rtl_sim_write_with_attrs(void *opaque, hwaddr addr,
   result = multisim_client_push(s->multisim_cmd_server, (data_handle_t)cmd_payload, AXI_CMD_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
-      goto function_out;
+      trace_axe_dv_rtl_sim_read(addr, size, data, ret);
+      return ret;
   }
 
   result = multisim_client_pull(s->multisim_rsp_server, (data_handle_t)rsp_payload, AXI_RSP_BIT_LEN);
   if (result != MULTISIM_SUCCESS) {
       ret = MEMTX_ERROR;
-      goto function_out;
+      trace_axe_dv_rtl_sim_read(addr, size, data, ret);
+      return ret;
   }
 
   ret = axe_dv_rtl_sim_axi_resp_to_memtxresult(rsp_payload[0]);
 
-function_out:
   trace_axe_dv_rtl_sim_write(addr, size, data, ret);
   return ret;
 }
