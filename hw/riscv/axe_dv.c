@@ -25,9 +25,12 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "hw/core/cpu.h"
+#include "hw/core/qdev.h"
 #include "hw/core/boards.h"
 #include "hw/core/loader.h"
 #include "hw/core/sysbus.h"
+#include "qemu/typedefs.h"
 #include "target/riscv/cpu.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/riscv/axe_dv.h"
@@ -37,6 +40,7 @@
 #include "hw/char/riscv_htif.h"
 #include "hw/intc/riscv_aclint.h"
 #include "hw/misc/axe-dv-rtl-sim.h"
+#include "hw/intc/sifive_plic.h"
 #include "chardev/char.h"
 #include "system/device_tree.h"
 #include "system/system.h"
@@ -49,6 +53,7 @@ static const MemMapEntry axe_dv_memmap[] = {
     [AXE_DV_MROM] =     {     0x1000,     0xf000 },
     [AXE_DV_HTIF] =     {  0x1000000,     0x1000 },
     [AXE_DV_CLINT] =    {  0x2000000,    0x10000 },
+    [AXE_DV_PLIC] =     {  0xc000000,  0x4000000 },
     [AXE_DV_DRAM] =     { 0x80000000,        0x0 },
     [AXE_DV_AXE_DV_RTL_SIM] = { 0x100000000,       0x100000000},
 };
@@ -221,6 +226,8 @@ static void axe_dv_board_init(MachineState *machine)
     bool htif_custom_base = false;
     RISCVBootInfo boot_info;
     DeviceState *axe_dv_rtl_sim;
+    char *plic_hart_config;
+    DeviceState *plic;
 
     /* Check socket count limit */
     if (AXE_DV_SOCKETS_MAX < riscv_socket_count(machine)) {
@@ -272,6 +279,24 @@ static void axe_dv_board_init(MachineState *machine)
             RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ, false);
     }
 
+    /* Create PLIC */
+    plic_hart_config = riscv_plic_hart_config_string(machine->smp.cpus);
+    plic = sifive_plic_create(
+        memmap[AXE_DV_PLIC].base,
+        plic_hart_config,
+        machine->smp.cpus,
+        0,                          /* hartid_base */
+        AXE_DV_PLIC_NUM_SOURCES,    /* num_sources (incl. reserved source 0) */
+        AXE_DV_PLIC_NUM_PRIORITIES, /* num_priorities */
+        AXE_DV_PLIC_PRIORITY_BASE,
+        AXE_DV_PLIC_PENDING_BASE,
+        AXE_DV_PLIC_ENABLE_BASE,
+        AXE_DV_PLIC_ENABLE_STRIDE,
+        AXE_DV_PLIC_CONTEXT_BASE,
+        AXE_DV_PLIC_CONTEXT_STRIDE,
+        memmap[AXE_DV_PLIC].size);
+    g_free(plic_hart_config);
+
     /* Create axe-dv-rtl-sim component */
     axe_dv_rtl_sim = qdev_new(TYPE_AXE_DV_RTL_SIM);
 
@@ -284,6 +309,10 @@ static void axe_dv_board_init(MachineState *machine)
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(axe_dv_rtl_sim), &error_fatal);
     sysbus_mmio_map(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0, memmap[AXE_DV_AXE_DV_RTL_SIM].base);
+
+    /* Route the RTL sim interrupt into the PLIC */
+    sysbus_connect_irq(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0,
+                       qdev_get_gpio_in(plic, AXE_DV_RTL_SIM_IRQ));
 
     /* register system main memory (actual RAM) */
     memory_region_add_subregion(system_memory, memmap[AXE_DV_DRAM].base,

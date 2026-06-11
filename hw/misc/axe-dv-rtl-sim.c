@@ -1,10 +1,14 @@
 
 // clang-format off
-#include "qemu/compiler.h"
 #include "qemu/osdep.h" // Must be at the top
+#include "hw/core/cpu.h"
+#include "hw/core/qdev.h"
+#include "hw/core/irq.h"
 #include "hw/core/sysbus.h"
 #include "hw/core/qdev-properties.h"
 #include "qapi/error.h"
+#include "qemu/main-loop.h"
+#include "qemu/typedefs.h"
 #include "system/system.h"
 #include "trace.h"
 #include "qemu/notify.h"
@@ -25,6 +29,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 #define MULTISIM_CMD_SERVER_NAME "rw_cmd"
 #define MULTISIM_RSP_SERVER_NAME "rw_rsp"
 #define MULTISIM_EXIT_SERVER_NAME "exit"
+#define MULTISIM_INTERRUPT_SERVER_NAME "interrupts"
 #define MULTISIM_CMD_READ 0x1
 #define MULTISIM_CMD_WRITE 0x0
 #define MULTISIM_MEM_WRITE_SUCCESS 0x0
@@ -37,6 +42,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 #define AXI_EXOKAY 1
 #define AXI_DEC_ERR 3
 #define EXIT_CMD_BIT_LEN (64*AXI_RSP_UI64_LEN)
+#define IRQ_BIT_LEN 64
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
@@ -48,8 +54,12 @@ struct AxeDvRtlSim {
   char* multisim_cmd_server;
   char* multisim_rsp_server;
   char* multisim_exit_server;
+  char* multisim_interrupt_server;
+  QemuThread irq_thread;
   uint64_t size;
   Notifier exit_notifier;
+  qemu_irq irq;
+  uint64_t irq_number;
 };
 
 static inline MemTxResult axe_dv_rtl_sim_axi_resp_to_memtxresult(uint64_t code) {
@@ -142,16 +152,44 @@ static const MemoryRegionOps axe_dv_rtl_sim_ops = {
 static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
     AxeDvRtlSim* s = container_of(notifier, AxeDvRtlSim, exit_notifier);
     const uint32_t exit_request = 0x1;
+    // TODO: Check command length (might be incorrect)
     multisim_client_push(s->multisim_exit_server, (data_handle_t)&exit_request, EXIT_CMD_BIT_LEN);
     trace_axe_dv_rtl_sim_exit();
 };
 
+static void *axe_dv_rtl_sim_irq_thread(void* opaque) {
+    AxeDvRtlSim* s = opaque;
+    uint64_t irq_status;
+    while (1) {
+        multisim_client_pull(s->multisim_interrupt_server, (data_handle_t)&irq_status, IRQ_BIT_LEN);
+        trace_axe_dv_rtl_sim_irq_status(irq_status);
+        /*
+         * This runs in a dedicated thread, so the BQL must be held while
+         * driving the IRQ line: qemu_irq_raise()/lower() propagates through
+         * the PLIC down to cpu_interrupt(), which is not thread-safe.
+         */
+        bql_lock();
+        // TODO: make irq configurable
+        if (irq_status > 0) {
+            qemu_irq_raise(s->irq);
+        } else {
+            qemu_irq_lower(s->irq);
+        }
+
+        bql_unlock();
+    }
+    return NULL;
+}
+
 static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   AxeDvRtlSim *s = AXE_DV_RTL_SIM(dev);
+  SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
   if (s->name == NULL) {
     s->name = g_strdup("axe-dv-rtl-sim");
   }
+
+  sysbus_init_irq(sbd, &s->irq);
 
   memory_region_init_io(&s->iomem, OBJECT(s), &axe_dv_rtl_sim_ops, s, s->name,
                         s->size);
@@ -174,9 +212,11 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   s->multisim_cmd_server = g_malloc0(MULTISIM_NAME_MAX);
   s->multisim_rsp_server = g_malloc0(MULTISIM_NAME_MAX);
   s->multisim_exit_server = g_malloc0(MULTISIM_NAME_MAX);
+  s->multisim_interrupt_server = g_malloc0(MULTISIM_NAME_MAX);
   if ((sprintf(s->multisim_cmd_server, "%s_%s", s->multisim_server_prefix, MULTISIM_CMD_SERVER_NAME) < 0) ||
-          (sprintf(s->multisim_rsp_server, "%s_%s", s->multisim_server_prefix, MULTISIM_RSP_SERVER_NAME) < 0) ||
-          (sprintf(s->multisim_exit_server, "%s_%s", s->multisim_server_prefix, MULTISIM_EXIT_SERVER_NAME) < 0)) {
+      (sprintf(s->multisim_rsp_server, "%s_%s", s->multisim_server_prefix, MULTISIM_RSP_SERVER_NAME) < 0) ||
+      (sprintf(s->multisim_exit_server, "%s_%s", s->multisim_server_prefix, MULTISIM_EXIT_SERVER_NAME) < 0) ||
+      (sprintf(s->multisim_interrupt_server, "%s_%s", s->multisim_server_prefix, MULTISIM_INTERRUPT_SERVER_NAME) < 0)) {
       error_setg(errp, "failed to create server names\n");
       return;
   }
@@ -184,13 +224,18 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   multisim_client_start(s->multisim_dir, s->multisim_cmd_server);
   multisim_client_start(s->multisim_dir, s->multisim_rsp_server);
   multisim_client_start(s->multisim_dir, s->multisim_exit_server);
+  multisim_client_start(s->multisim_dir, s->multisim_interrupt_server);
 
   trace_axe_dv_rtl_sim_connection_done();
 
-  sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
+  sysbus_init_mmio(sbd, &s->iomem);
+  qdev_init_gpio_out(dev, &s->irq, 1);
 
   s->exit_notifier.notify = axe_dv_rtl_sim_exit_notifier;
   qemu_add_exit_notifier(&s->exit_notifier);
+
+  qemu_thread_create(&s->irq_thread, "axe-dv-rtl-sim-interrupt", axe_dv_rtl_sim_irq_thread,
+                     s, QEMU_THREAD_JOINABLE);
 }
 
 static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
@@ -199,6 +244,7 @@ static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
     g_free(s->multisim_cmd_server);
     g_free(s->multisim_rsp_server);
     g_free(s->multisim_exit_server);
+    g_free(s->multisim_interrupt_server);
 }
 
 static const Property axe_dv_rtl_sim_properties[] = {

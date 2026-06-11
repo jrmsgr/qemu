@@ -74,6 +74,7 @@ axe_dv_rtl_sim_write(uint64_t addr, unsigned size, uint64_t data, int result) "w
 axe_dv_rtl_sim_read(uint64_t addr, unsigned size, uint64_t data, int result) "rd addr:0x%08"PRIx64" size: %u data:0x%08"PRIx64" result: %d"
 axe_dv_rtl_sim_exit(void) "Exiting"
 axe_dv_rtl_sim_connection_done(void) "Connexion successful"
+axe_dv_rtl_sim_irq_status(uint64_t irq_status) "IRQ Status: 0x%08"PRIx64
 
 # slavio_misc.c
 slavio_misc_update_irq_raise(void) "Raise IRQ"
