@@ -30,7 +30,7 @@ enum {
 #define AXE_DV_PLIC_CONTEXT_STRIDE 0x1000
 
 /* PLIC interrupt sources. Source 0 is reserved by the PLIC spec. */
-#define AXE_DV_RTL_SIM_IRQ   1
+#define AXE_DV_RTL_SIM_IRQ 520
 #define AXE_DV_PLIC_NUM_SOURCES (AXE_DV_RTL_SIM_IRQ + 1)
 
 #endif

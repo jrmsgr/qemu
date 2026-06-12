@@ -1,5 +1,5 @@
 /*
- * QEMU RISC-V Spike Board
+ * QEMU RISC-V AXE_DV Spike Board
  *
  * Copyright (c) 2016-2017 Sagar Karandikar, sagark@eecs.berkeley.edu
  * Copyright (c) 2017-2018 SiFive, Inc.
@@ -8,6 +8,8 @@
  *
  * 0) HTIF Console and Poweroff
  * 1) CLINT (Timer and IPI)
+ * 2) PLIC (Sifive version)
+ * 3) AXE_DV_RTL_SIM component
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -31,6 +33,7 @@
 #include "hw/core/loader.h"
 #include "hw/core/sysbus.h"
 #include "qemu/typedefs.h"
+#include "qom/object.h"
 #include "target/riscv/cpu.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/riscv/axe_dv.h"
@@ -48,6 +51,7 @@
 #include <libfdt.h>
 
 static const char *multisim_server_prefix = NULL;
+static uint32_t axe_dv_rtl_sim_irq_number = 0;
 
 static const MemMapEntry axe_dv_memmap[] = {
     [AXE_DV_MROM] =     {     0x1000,     0xf000 },
@@ -306,13 +310,16 @@ static void axe_dv_board_init(MachineState *machine)
         multisim_server_prefix = "qemu";
     }
     qdev_prop_set_string(axe_dv_rtl_sim, "multisim-server-prefix", multisim_server_prefix);
+    qdev_prop_set_uint64(axe_dv_rtl_sim, "irq-number", axe_dv_rtl_sim_irq_number);
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(axe_dv_rtl_sim), &error_fatal);
     sysbus_mmio_map(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0, memmap[AXE_DV_AXE_DV_RTL_SIM].base);
 
     /* Route the RTL sim interrupt into the PLIC */
-    sysbus_connect_irq(SYS_BUS_DEVICE(axe_dv_rtl_sim), 0,
-                       qdev_get_gpio_in(plic, AXE_DV_RTL_SIM_IRQ));
+    for (int irq =0; irq<axe_dv_rtl_sim_irq_number; irq++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(axe_dv_rtl_sim), irq,
+                           qdev_get_gpio_in(plic, irq+1));
+    }
 
     /* register system main memory (actual RAM) */
     memory_region_add_subregion(system_memory, memmap[AXE_DV_DRAM].base,
@@ -430,6 +437,9 @@ static void axe_dv_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_str(oc, "axe-dv-rtl-multisim-server-prefix", NULL, axe_dv_set_multisim_server_prefix);
     object_class_property_set_description(oc, "axe-dv-rtl-multisim-server-prefix",
                                           "Prefix of the multisim server to connect to.");
+    object_class_property_add_uint32_ptr(oc, "axe-dv-rtl-sim-irq-number", &axe_dv_rtl_sim_irq_number, OBJ_PROP_FLAG_WRITE);
+    object_class_property_set_description(oc, "axe-dv-rtl-sim-irq-number",
+                                          "Number of IRQs lines to give to the axe-dv-rtl-sim device");
 }
 
 static const TypeInfo axe_dv_machine_typeinfo = {

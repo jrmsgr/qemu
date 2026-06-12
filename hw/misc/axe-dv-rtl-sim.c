@@ -42,7 +42,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(AxeDvRtlSim, AXE_DV_RTL_SIM)
 #define AXI_EXOKAY 1
 #define AXI_DEC_ERR 3
 #define EXIT_CMD_BIT_LEN (64*AXI_RSP_UI64_LEN)
-#define IRQ_BIT_LEN 64
+// Max number of interrupt lines that can be instantiated
+// SiFive's PLIC supports up to 520 but this makes tracing more complicated
+#define MAX_IRQ_NUMBER 64
 
 struct AxeDvRtlSim {
   SysBusDevice parent_obj;
@@ -56,10 +58,10 @@ struct AxeDvRtlSim {
   char* multisim_exit_server;
   char* multisim_interrupt_server;
   QemuThread irq_thread;
-  uint64_t size;
-  Notifier exit_notifier;
-  qemu_irq irq;
-  uint64_t irq_number;
+  uint64_t  size;
+  Notifier  exit_notifier;
+  qemu_irq* irqs;
+  uint64_t  irq_number;
 };
 
 static inline MemTxResult axe_dv_rtl_sim_axi_resp_to_memtxresult(uint64_t code) {
@@ -159,9 +161,9 @@ static void axe_dv_rtl_sim_exit_notifier(Notifier* notifier, void* data) {
 
 static void *axe_dv_rtl_sim_irq_thread(void* opaque) {
     AxeDvRtlSim* s = opaque;
-    uint64_t irq_status;
+    uint64_t irq_status = 0;
     while (1) {
-        multisim_client_pull(s->multisim_interrupt_server, (data_handle_t)&irq_status, IRQ_BIT_LEN);
+        multisim_client_pull(s->multisim_interrupt_server, (data_handle_t)&irq_status, s->irq_number);
         trace_axe_dv_rtl_sim_irq_status(irq_status);
         /*
          * This runs in a dedicated thread, so the BQL must be held while
@@ -169,13 +171,13 @@ static void *axe_dv_rtl_sim_irq_thread(void* opaque) {
          * the PLIC down to cpu_interrupt(), which is not thread-safe.
          */
         bql_lock();
-        // TODO: make irq configurable
-        if (irq_status > 0) {
-            qemu_irq_raise(s->irq);
-        } else {
-            qemu_irq_lower(s->irq);
+        for (uint64_t i = 0; i<s->irq_number; i++) {
+            if (irq_status & ((uint64_t)1<<i)) {
+                qemu_irq_raise(s->irqs[i]);
+            } else {
+                qemu_irq_lower(s->irqs[i]);
+            }
         }
-
         bql_unlock();
     }
     return NULL;
@@ -188,8 +190,6 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   if (s->name == NULL) {
     s->name = g_strdup("axe-dv-rtl-sim");
   }
-
-  sysbus_init_irq(sbd, &s->irq);
 
   memory_region_init_io(&s->iomem, OBJECT(s), &axe_dv_rtl_sim_ops, s, s->name,
                         s->size);
@@ -229,13 +229,23 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   trace_axe_dv_rtl_sim_connection_done();
 
   sysbus_init_mmio(sbd, &s->iomem);
-  qdev_init_gpio_out(dev, &s->irq, 1);
 
   s->exit_notifier.notify = axe_dv_rtl_sim_exit_notifier;
   qemu_add_exit_notifier(&s->exit_notifier);
 
-  qemu_thread_create(&s->irq_thread, "axe-dv-rtl-sim-interrupt", axe_dv_rtl_sim_irq_thread,
-                     s, QEMU_THREAD_JOINABLE);
+  if (s->irq_number > 0) {
+    if (s->irq_number > MAX_IRQ_NUMBER) {
+        error_setg(errp, "too many IRQs requested: %lu. Max %d are supported\n", s->irq_number, MAX_IRQ_NUMBER);
+        return;
+    }
+    s->irqs = g_malloc0(s->irq_number*sizeof(qemu_irq));
+    for (uint64_t i=0; i<s->irq_number; i++) {
+        sysbus_init_irq(sbd, &s->irqs[i]);
+    }
+    qdev_init_gpio_out(dev, s->irqs, s->irq_number);
+    qemu_thread_create(&s->irq_thread, "axe-dv-rtl-sim-interrupt-thread", axe_dv_rtl_sim_irq_thread,
+                       s, QEMU_THREAD_JOINABLE);
+  }
 }
 
 static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
@@ -245,12 +255,16 @@ static void axe_dv_rtl_sim_unrealize(DeviceState* dev) {
     g_free(s->multisim_rsp_server);
     g_free(s->multisim_exit_server);
     g_free(s->multisim_interrupt_server);
+    if (s->irq_number > 0) {
+        g_free(s->irqs);
+    }
 }
 
 static const Property axe_dv_rtl_sim_properties[] = {
     DEFINE_PROP_STRING("name", AxeDvRtlSim, name),
     DEFINE_PROP_UINT64("size", AxeDvRtlSim, size, 0),
     DEFINE_PROP_STRING("multisim-server-prefix", AxeDvRtlSim, multisim_server_prefix),
+    DEFINE_PROP_UINT64("irq-number", AxeDvRtlSim, irq_number, 0),
 };
 
 static void axe_dv_rtl_sim_class_init(ObjectClass *klass, const void *data) {
