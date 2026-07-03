@@ -224,7 +224,9 @@ static void axe_dv_rtl_sim_realize(DeviceState *dev, Error **errp) {
   multisim_client_start(s->multisim_dir, s->multisim_cmd_server);
   multisim_client_start(s->multisim_dir, s->multisim_rsp_server);
   multisim_client_start(s->multisim_dir, s->multisim_exit_server);
-  multisim_client_start(s->multisim_dir, s->multisim_interrupt_server);
+  if (s->irq_number > 0) {
+     multisim_client_start(s->multisim_dir, s->multisim_interrupt_server);
+  }
 
   trace_axe_dv_rtl_sim_connection_done();
 
