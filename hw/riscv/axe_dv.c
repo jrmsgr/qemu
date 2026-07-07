@@ -53,12 +53,19 @@
 static const char *multisim_server_prefix = NULL;
 static uint32_t axe_dv_rtl_sim_irq_number = 0;
 
-static const MemMapEntry axe_dv_memmap[] = {
+/*
+ * Optional DRAM base address and size overrides from the command line. A value of 0 means
+ * "not set", in which case the compiled-in default from axe_dv_memmap is used.
+ */
+static uint64_t axe_dv_dram_base = 0;
+static uint64_t axe_dv_dram_size = 0;
+
+static MemMapEntry axe_dv_memmap[] = {
     [AXE_DV_MROM] =     {     0x1000,     0xf000 },
     [AXE_DV_HTIF] =     {  0x1000000,     0x1000 },
     [AXE_DV_CLINT] =    {  0x2000000,    0x10000 },
+    [AXE_DV_DRAM] =     { 0x8000000,        0x1000000 },
     [AXE_DV_PLIC] =     {  0xc000000,  0x4000000 },
-    [AXE_DV_DRAM] =     { 0x80000000,        0x0 },
     [AXE_DV_AXE_DV_RTL_SIM] = { 0x100000000,       0x100000000},
 };
 
@@ -67,13 +74,12 @@ static void create_fdt(AxeDvState *s, const MemMapEntry *memmap,
 {
     void *fdt;
     int fdt_size;
-    uint64_t addr, size;
     unsigned long clint_addr;
     int cpu, socket;
     MachineState *ms = MACHINE(s);
     uint32_t *clint_cells;
     uint32_t cpu_phandle, intc_phandle, phandle = 1;
-    char *mem_name, *clint_name, *clust_name;
+    char *clint_name, *clust_name;
     char *core_name, *cpu_name, *intc_name;
     g_autofree char *axe_dv_rtl_sim_name = NULL;
     static const char * const clint_compat[2] = {
@@ -160,16 +166,6 @@ static void create_fdt(AxeDvState *s, const MemMapEntry *memmap,
             g_free(cpu_name);
         }
 
-        addr = memmap[AXE_DV_DRAM].base + riscv_socket_mem_offset(ms, socket);
-        size = riscv_socket_mem_size(ms, socket);
-        mem_name = g_strdup_printf("/memory@%lx", (long)addr);
-        qemu_fdt_add_subnode(fdt, mem_name);
-        qemu_fdt_setprop_cells(fdt, mem_name, "reg",
-            addr >> 32, addr, size >> 32, size);
-        qemu_fdt_setprop_string(fdt, mem_name, "device_type", "memory");
-        riscv_socket_fdt_write_id(ms, mem_name, socket);
-        g_free(mem_name);
-
         clint_addr = memmap[AXE_DV_CLINT].base +
             (memmap[AXE_DV_CLINT].size * socket);
         clint_name = g_strdup_printf("/soc/clint@%lx", clint_addr);
@@ -215,10 +211,18 @@ static bool axe_dv_test_elf_image(char *filename)
 
 static void axe_dv_board_init(MachineState *machine)
 {
+    if (axe_dv_dram_base) {
+        axe_dv_memmap[AXE_DV_DRAM].base = axe_dv_dram_base;
+    }
+    if (axe_dv_dram_size) {
+        axe_dv_memmap[AXE_DV_DRAM].size = axe_dv_dram_size;
+    }
+
     const MemMapEntry *memmap = axe_dv_memmap;
     AxeDvState *s = AXE_DV_MACHINE(machine);
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
+    MemoryRegion *system_ram = g_new(MemoryRegion, 1);
     hwaddr firmware_end_addr = memmap[AXE_DV_DRAM].base;
     hwaddr firmware_load_addr = memmap[AXE_DV_DRAM].base;
     vaddr kernel_start_addr;
@@ -322,8 +326,10 @@ static void axe_dv_board_init(MachineState *machine)
     }
 
     /* register system main memory (actual RAM) */
+    memory_region_init_ram(system_ram, NULL, "riscv.axe_dv.dram",
+                           memmap[AXE_DV_DRAM].size, &error_fatal);
     memory_region_add_subregion(system_memory, memmap[AXE_DV_DRAM].base,
-        machine->ram);
+                                system_ram);
 
     /* boot rom */
     memory_region_init_rom(mask_rom, NULL, "riscv.axe_dv.mrom",
@@ -440,6 +446,15 @@ static void axe_dv_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_uint32_ptr(oc, "axe-dv-rtl-sim-irq-number", &axe_dv_rtl_sim_irq_number, OBJ_PROP_FLAG_WRITE);
     object_class_property_set_description(oc, "axe-dv-rtl-sim-irq-number",
                                           "Number of IRQs lines to give to the axe-dv-rtl-sim device");
+
+    object_class_property_add_uint64_ptr(oc, "ram-base", &axe_dv_dram_base,
+                                         OBJ_PROP_FLAG_WRITE);
+    object_class_property_set_description(oc, "ram-base",
+                                          "Base address of the RAM/DRAM");
+    object_class_property_add_uint64_ptr(oc, "ram-size", &axe_dv_dram_size,
+                                         OBJ_PROP_FLAG_WRITE);
+    object_class_property_set_description(oc, "ram-size",
+                                          "Size address of the RAM/DRAM");
 }
 
 static const TypeInfo axe_dv_machine_typeinfo = {
